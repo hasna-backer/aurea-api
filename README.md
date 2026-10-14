@@ -31,5 +31,9 @@ Auth is an httpOnly cookie (`aurea_token`). Admin routes need `role: admin`.
 ## Notes
 
 - Stripe: when `STRIPE_SECRET_KEY` is unset, checkout completes in DEV mode (no charge). Set the key for real PaymentIntents.
+- Live payments: `POST /api/orders/webhook` (raw body, signature verified with `STRIPE_WEBHOOK_SECRET`) is the source of truth for marking orders paid. `POST /api/orders/:id/confirm` is a fallback that re-verifies with Stripe server-side.
+- Idempotency: send `X-Idempotency-Key` (or `idempotencyKey` in the body) with checkout; retries return the original order instead of duplicating.
+- Stock is reserved atomically per item at checkout (`stock >= qty` guard + rollback); abandoned Stripe-mode reservations are released on `payment_intent.payment_failed`. Expire stale `pending` orders with a cron in production.
+- Auth responses never include raw tokens unless `ALLOW_DEV_TOKENS=1` (tests only, never production). `JWT_SECRET` is required to boot.
 - Email: dev mode logs to console. Wire SMTP in phase 2.
 - All data is fictional demo content.

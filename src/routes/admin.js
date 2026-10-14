@@ -5,7 +5,7 @@ import { Review } from '../models/Review.js';
 import { Subscription } from '../models/Subscription.js';
 import { User } from '../models/User.js';
 import { ContactMessage } from '../models/ContactMessage.js';
-import { asyncHandler, protect, adminOnly, sanitizeUser } from '../middleware.js';
+import { asyncHandler, protect, adminOnly, sanitizeUser, pageParams } from '../middleware.js';
 
 const router = Router();
 router.use(protect, adminOnly);
@@ -16,6 +16,10 @@ router.get(
     const paid = await Order.aggregate([
       { $match: { status: { $in: ['paid', 'fulfilled', 'shipped', 'delivered'] } } },
       { $group: { _id: null, revenue: { $sum: '$total' }, count: { $sum: 1 } } },
+    ]);
+    const refunded = await Order.aggregate([
+      { $match: { status: 'refunded' } },
+      { $group: { _id: null, total: { $sum: '$total' } } },
     ]);
     const byStatus = await Order.aggregate([
       { $group: { _id: '$status', count: { $sum: 1 } } },
@@ -30,7 +34,8 @@ router.get(
     const recentOrders = await Order.find().sort({ createdAt: -1 }).limit(10);
     res.json({
       stats: {
-        revenue: paid[0]?.revenue || 0,
+        // Net revenue: collected minus refunded.
+        revenue: (paid[0]?.revenue || 0) - (refunded[0]?.total || 0),
         paidOrders: paid[0]?.count || 0,
         byStatus,
         customers,
@@ -47,8 +52,12 @@ router.get(
 router.get(
   '/users',
   asyncHandler(async (req, res) => {
-    const users = await User.find().sort({ createdAt: -1 }).limit(200);
-    res.json({ users: users.map(sanitizeUser) });
+    const { page, limit, skip } = pageParams(req);
+    const [users, total] = await Promise.all([
+      User.find().sort({ createdAt: -1 }).skip(skip).limit(limit),
+      User.countDocuments(),
+    ]);
+    res.json({ users: users.map(sanitizeUser), meta: { page, limit, total } });
   })
 );
 
@@ -58,6 +67,8 @@ router.put(
     const { role } = req.body || {};
     if (!['customer', 'admin'].includes(role))
       return res.status(400).json({ error: 'Invalid role' });
+    if (req.user._id.toString() === req.params.id && role !== 'admin')
+      return res.status(400).json({ error: 'You cannot demote yourself' });
     const user = await User.findByIdAndUpdate(req.params.id, { role }, { new: true });
     if (!user) return res.status(404).json({ error: 'User not found' });
     res.json({ user: sanitizeUser(user) });

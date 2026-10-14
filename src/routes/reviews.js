@@ -1,10 +1,12 @@
 import { Router } from 'express';
+import rateLimit from 'express-rate-limit';
 import { Review } from '../models/Review.js';
 import { Product } from '../models/Product.js';
 import { Order } from '../models/Order.js';
-import { asyncHandler, protect, adminOnly } from '../middleware.js';
+import { asyncHandler, protect, adminOnly, pageParams } from '../middleware.js';
 
 const router = Router();
+const helpfulLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 20 });
 
 async function refreshRating(productId) {
   const agg = await Review.aggregate([
@@ -20,11 +22,13 @@ async function refreshRating(productId) {
 router.get(
   '/product/:productId',
   asyncHandler(async (req, res) => {
-    const reviews = await Review.find({ product: req.params.productId, status: 'approved' })
-      .populate('user', 'name')
-      .sort({ createdAt: -1 })
-      .limit(50);
-    res.json({ reviews });
+    const { page, limit, skip } = pageParams(req, 20, 50);
+    const filter = { product: req.params.productId, status: 'approved' };
+    const [reviews, total] = await Promise.all([
+      Review.find(filter).populate('user', 'name').sort({ createdAt: -1 }).skip(skip).limit(limit),
+      Review.countDocuments(filter),
+    ]);
+    res.json({ reviews, meta: { page, limit, total } });
   })
 );
 
@@ -38,6 +42,9 @@ router.post(
     if (!text?.trim()) return res.status(400).json({ error: 'Review text required' });
     const product = await Product.findById(req.params.productId);
     if (!product) return res.status(404).json({ error: 'Product not found' });
+    const dupe = await Review.exists({ product: product._id, user: req.user._id });
+    if (dupe)
+      return res.status(409).json({ error: 'You have already reviewed this product' });
     const bought = await Order.exists({
       user: req.user._id,
       status: { $in: ['paid', 'fulfilled', 'shipped', 'delivered'] },
@@ -50,14 +57,15 @@ router.post(
       title: title?.slice(0, 120),
       text: text.trim().slice(0, 2000),
       verified: Boolean(bought),
+      status: 'pending', // visible after admin approval
     });
-    await refreshRating(product._id);
-    res.status(201).json({ review });
+    res.status(201).json({ review, note: 'Submitted for moderation' });
   })
 );
 
 router.post(
   '/:id/helpful',
+  helpfulLimiter,
   asyncHandler(async (req, res) => {
     const review = await Review.findByIdAndUpdate(
       req.params.id,
@@ -76,12 +84,18 @@ router.get(
   adminOnly,
   asyncHandler(async (req, res) => {
     const { status } = req.query;
-    const reviews = await Review.find(status ? { status } : {})
-      .populate('user', 'name email')
-      .populate('product', 'name slug')
-      .sort({ createdAt: -1 })
-      .limit(200);
-    res.json({ reviews });
+    const { page, limit, skip } = pageParams(req);
+    const filter = status ? { status } : {};
+    const [reviews, total] = await Promise.all([
+      Review.find(filter)
+        .populate('user', 'name email')
+        .populate('product', 'name slug')
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit),
+      Review.countDocuments(filter),
+    ]);
+    res.json({ reviews, meta: { page, limit, total } });
   })
 );
 

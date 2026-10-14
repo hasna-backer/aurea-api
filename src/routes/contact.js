@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { ContactMessage } from '../models/ContactMessage.js';
-import { asyncHandler, protect, adminOnly } from '../middleware.js';
+import { asyncHandler, protect, adminOnly, pageParams } from '../middleware.js';
 import { sendMail } from '../email.js';
 
 const router = Router();
@@ -27,8 +27,12 @@ router.post(
 );
 
 router.get('/', protect, adminOnly, asyncHandler(async (req, res) => {
-  const messages = await ContactMessage.find().sort({ createdAt: -1 }).limit(200);
-  res.json({ messages });
+  const { page, limit, skip } = pageParams(req);
+  const [messages, total] = await Promise.all([
+    ContactMessage.find().sort({ createdAt: -1 }).skip(skip).limit(limit),
+    ContactMessage.countDocuments(),
+  ]);
+  res.json({ messages, meta: { page, limit, total } });
 }));
 
 router.put(

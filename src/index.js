@@ -10,7 +10,7 @@ import { errorHandler, notFound } from './middleware.js';
 import authRoutes from './routes/auth.js';
 import productRoutes from './routes/products.js';
 import cartRoutes from './routes/cart.js';
-import orderRoutes from './routes/orders.js';
+import orderRoutes, { stripeWebhook } from './routes/orders.js';
 import quizRoutes from './routes/quiz.js';
 import reviewRoutes from './routes/reviews.js';
 import couponRoutes from './routes/coupons.js';
@@ -22,6 +22,11 @@ const app = express();
 app.use(helmet());
 app.use(morgan('dev'));
 app.use(cors({ origin: config.clientUrl, credentials: true }));
+
+// Stripe webhook needs the RAW body for signature verification,
+// so it is mounted before the JSON parser.
+app.post('/api/orders/webhook', express.raw({ type: 'application/json' }), stripeWebhook);
+
 app.use(express.json({ limit: '1mb' }));
 app.use(cookieParser());
 

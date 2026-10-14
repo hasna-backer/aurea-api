@@ -13,7 +13,7 @@ const orderItem = new mongoose.Schema(
 
 const orderSchema = new mongoose.Schema(
   {
-    user: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+    user: { type: mongoose.Schema.Types.ObjectId, ref: 'User', index: true },
     email: { type: String, required: true },
     items: [orderItem],
     subtotal: { type: Number, required: true },
@@ -21,6 +21,9 @@ const orderSchema = new mongoose.Schema(
     shipping: { type: Number, default: 0 },
     total: { type: Number, required: true },
     couponCode: String,
+    // Client-generated idempotency key: retries of the same checkout
+    // return the original order instead of creating a duplicate.
+    idempotencyKey: { type: String, sparse: true },
     shippingAddress: {
       name: String,
       line1: String,
@@ -42,6 +45,12 @@ const orderSchema = new mongoose.Schema(
     paidAt: Date,
   },
   { timestamps: true }
+);
+
+orderSchema.index({ user: 1, createdAt: -1 });
+orderSchema.index(
+  { user: 1, idempotencyKey: 1 },
+  { unique: true, sparse: true, partialFilterExpression: { idempotencyKey: { $exists: true } } }
 );
 
 export const Order = mongoose.model('Order', orderSchema);

@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { Coupon } from '../models/Coupon.js';
-import { asyncHandler, protect, adminOnly } from '../middleware.js';
+import { asyncHandler, protect, adminOnly, pageParams } from '../middleware.js';
 import { getValidCoupon } from '../pricing.js';
 
 const router = Router();
@@ -22,7 +22,12 @@ router.post(
 );
 
 router.get('/', protect, adminOnly, asyncHandler(async (req, res) => {
-  res.json({ coupons: await Coupon.find().sort({ createdAt: -1 }) });
+  const { page, limit, skip } = pageParams(req);
+  const [coupons, total] = await Promise.all([
+    Coupon.find().sort({ createdAt: -1 }).skip(skip).limit(limit),
+    Coupon.countDocuments(),
+  ]);
+  res.json({ coupons, meta: { page, limit, total } });
 }));
 
 router.post(

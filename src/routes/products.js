@@ -1,19 +1,26 @@
 import { Router } from 'express';
 import { Product } from '../models/Product.js';
-import { asyncHandler, protect, adminOnly } from '../middleware.js';
+import { asyncHandler, protect, adminOnly, pageParams } from '../middleware.js';
 
 const router = Router();
+
+function escapeRegex(s) {
+  return String(s).slice(0, 60).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
 
 router.get(
   '/',
   asyncHandler(async (req, res) => {
-    const { q, step, all } = req.query;
+    const { q, step, all, page, limit, skip } = { ...req.query, ...pageParams(req, 50, 100) };
     const filter = {};
     if (all !== '1') filter.published = true;
     if (step) filter.step = step;
-    if (q) filter.name = { $regex: String(q).slice(0, 60), $options: 'i' };
-    const products = await Product.find(filter).sort({ createdAt: 1 });
-    res.json({ products });
+    if (q) filter.name = { $regex: escapeRegex(q), $options: 'i' };
+    const [products, total] = await Promise.all([
+      Product.find(filter).sort({ createdAt: 1 }).skip(skip).limit(limit),
+      Product.countDocuments(filter),
+    ]);
+    res.json({ products, meta: { page, limit, total } });
   })
 );
 
@@ -44,7 +51,12 @@ router.post(
   protect,
   adminOnly,
   asyncHandler(async (req, res) => {
-    const product = await Product.create(req.body);
+    const { slug, name, tagline, description, howToUse, ingredients, price, compareAtPrice, images, step, stock, lowStockAt, published } = req.body || {};
+    const product = await Product.create({
+      slug, name, tagline, description, howToUse, ingredients, price, compareAtPrice,
+      images: Array.isArray(images) ? images.slice(0, 10) : [],
+      step, stock, lowStockAt, published,
+    });
     res.status(201).json({ product });
   })
 );
@@ -54,7 +66,12 @@ router.put(
   protect,
   adminOnly,
   asyncHandler(async (req, res) => {
-    const product = await Product.findByIdAndUpdate(req.params.id, req.body, {
+    const allowed = ['slug', 'name', 'tagline', 'description', 'howToUse', 'ingredients', 'price', 'compareAtPrice', 'images', 'step', 'stock', 'lowStockAt', 'published'];
+    const patch = Object.fromEntries(
+      Object.entries(req.body || {}).filter(([k]) => allowed.includes(k))
+    );
+    if (Array.isArray(patch.images)) patch.images = patch.images.slice(0, 10);
+    const product = await Product.findByIdAndUpdate(req.params.id, patch, {
       new: true,
       runValidators: true,
     });

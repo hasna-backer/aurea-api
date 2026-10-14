@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { Subscription } from '../models/Subscription.js';
 import { Product } from '../models/Product.js';
-import { asyncHandler, protect, adminOnly } from '../middleware.js';
+import { asyncHandler, protect, adminOnly, pageParams } from '../middleware.js';
 
 const router = Router();
 router.use(protect);
@@ -66,12 +66,18 @@ router.get(
   adminOnly,
   asyncHandler(async (req, res) => {
     const { status } = req.query;
-    const subs = await Subscription.find(status ? { status } : {})
-      .populate('user', 'name email')
-      .populate('items.product', 'name slug')
-      .sort({ createdAt: -1 })
-      .limit(200);
-    res.json({ subscriptions: subs });
+    const { page, limit, skip } = pageParams(req);
+    const filter = status ? { status } : {};
+    const [subs, total] = await Promise.all([
+      Subscription.find(filter)
+        .populate('user', 'name email')
+        .populate('items.product', 'name slug')
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit),
+      Subscription.countDocuments(filter),
+    ]);
+    res.json({ subscriptions: subs, meta: { page, limit, total } });
   })
 );
 

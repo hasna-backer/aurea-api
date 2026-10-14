@@ -29,6 +29,8 @@ const userSchema = new mongoose.Schema(
     },
     passwordHash: { type: String, required: true, select: false },
     role: { type: String, enum: ['customer', 'admin'], default: 'customer' },
+    // Bumped on password reset to revoke all existing sessions.
+    tokenVersion: { type: Number, default: 0 },
     emailVerified: { type: Boolean, default: false },
     verifyTokenHash: { type: String, select: false },
     resetTokenHash: { type: String, select: false },

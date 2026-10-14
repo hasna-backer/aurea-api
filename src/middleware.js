@@ -6,9 +6,11 @@ export const asyncHandler = (fn) => (req, res, next) =>
   Promise.resolve(fn(req, res, next)).catch(next);
 
 export function signToken(user) {
-  return jwt.sign({ id: user._id.toString(), role: user.role }, config.jwtSecret, {
-    expiresIn: '7d',
-  });
+  return jwt.sign(
+    { id: user._id.toString(), role: user.role, v: user.tokenVersion || 0 },
+    config.jwtSecret,
+    { expiresIn: '7d' }
+  );
 }
 
 export function setAuthCookie(res, token) {
@@ -32,6 +34,9 @@ export const protect = asyncHandler(async (req, res, next) => {
   }
   const user = await User.findById(payload.id);
   if (!user) return res.status(401).json({ error: 'Account not found' });
+  // Session revocation: password resets bump tokenVersion, killing old tokens.
+  if ((user.tokenVersion || 0) !== (payload.v || 0))
+    return res.status(401).json({ error: 'Session revoked, please log in again' });
   req.user = user;
   next();
 });
@@ -55,7 +60,11 @@ export function errorHandler(err, req, res, next) {
     return res.status(400).json({ error: 'Validation failed', details: err.message });
   if (err?.code === 11000)
     return res.status(409).json({ error: 'Already exists' });
-  res.status(err.status || 500).json({ error: err.message || 'Server error' });
+  const status = err.status || 500;
+  // Never leak driver/library internals to clients in production.
+  if (status >= 500 && process.env.NODE_ENV === 'production')
+    return res.status(500).json({ error: 'Server error' });
+  res.status(status).json({ error: err.message || 'Server error' });
 }
 
 export function sanitizeUser(user) {
@@ -67,4 +76,11 @@ export function sanitizeUser(user) {
     addresses: user.addresses || [],
     createdAt: user.createdAt,
   };
+}
+
+// Simple page/limit helper for admin listings.
+export function pageParams(req, def = 50, max = 100) {
+  const page = Math.max(1, Number(req.query.page) || 1);
+  const limit = Math.max(1, Math.min(max, Number(req.query.limit) || def));
+  return { page, limit, skip: (page - 1) * limit };
 }
